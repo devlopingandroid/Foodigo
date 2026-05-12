@@ -1,347 +1,594 @@
 import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  StatusBar, Platform, ActivityIndicator, Modal, TextInput,
+  ActivityIndicator,
+  FlatList,
+  Linking,
+  Modal,
+  Platform,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View
 } from 'react-native';
-import Animated, { FadeInUp, FadeInDown } from 'react-native-reanimated';
+import Animated, {
+  FadeInDown
+} from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { COLORS, SIZES, SHADOWS } from '../constants/theme';
+
+import CategoryPill from '../components/CategoryPill';
+import RecipeCard from '../components/RecipeCard';
+import TrendingItem from '../components/TrendingItem';
 import { GROQ_API_KEY } from '../constants/config';
+import { COLORS, SHADOWS, SIZES } from '../constants/theme';
 
-// ─── helpers ──────────────────────────────────────────────────────────────────
+const RECIPES_DATA = [
+  // BULKING
+  { id: 1, name: "Mass Gainer Beef Bowl", emoji: "🥩", cal: 850, time: "30 min", category: "Bulking", protein: 65, carbs: 80, fat: 28, tag: 'Non-Veg' },
+  { id: 5, name: "Paneer Protein Feast", emoji: "🧀", cal: 720, time: "25 min", category: "Bulking", protein: 45, carbs: 50, fat: 35, tag: 'Veg' },
+  { id: 9, name: "Sweet Potato Chickpea Curry", emoji: "🍛", cal: 680, time: "35 min", category: "Bulking", protein: 28, carbs: 95, fat: 18, tag: 'Veg' },
 
-const getGreeting = () => {
-  const h = new Date().getHours();
-  if (h < 12) return 'Good Morning 👋';
-  if (h < 17) return 'Good Afternoon ☀️';
-  if (h < 21) return 'Good Evening 🌆';
-  return 'Good Night 🌙';
+  // DIETING
+  { id: 4, name: "Shredded Zucchini Bowl", emoji: "🥗", cal: 210, time: "15 min", category: "Dieting", protein: 18, carbs: 12, fat: 8, tag: 'Veg' },
+  { id: 8, name: "Lean Lemon Fish", emoji: "🐟", cal: 280, time: "20 min", category: "Dieting", protein: 35, carbs: 5, fat: 12, tag: 'Non-Veg' },
+  { id: 10, name: "Spinach & Tofu Scramble", emoji: "🥘", cal: 240, time: "12 min", category: "Dieting", protein: 22, carbs: 8, fat: 14, tag: 'Veg' },
+  { id: 13, name: "Cucumber Avocado Salad", emoji: "🥒", cal: 190, time: "8 min", category: "Dieting", protein: 5, carbs: 12, fat: 15, tag: 'Veg' },
+
+  // SPICY
+  { id: 3, name: "Volcano Chili Ramen", emoji: "🍜", cal: 560, time: "30 min", category: "Spicy", protein: 22, carbs: 68, fat: 18, tag: 'Veg' },
+  { id: 11, name: "Spicy Masala Paneer", emoji: "🍢", cal: 420, time: "20 min", category: "Spicy", protein: 24, carbs: 15, fat: 28, tag: 'Veg' },
+  { id: 14, name: "Peri Peri Roasted Corn", emoji: "🌽", cal: 310, time: "15 min", category: "Spicy", protein: 8, carbs: 45, fat: 12, tag: 'Veg' },
+
+  // SWEET
+  { id: 2, name: "Protein Berry Parfait", emoji: "🍧", cal: 320, time: "5 min", category: "Sweet", protein: 25, carbs: 35, fat: 6, tag: 'Veg' },
+  { id: 6, name: "Chia Choco Pudding", emoji: "🍮", cal: 240, time: "10 min", category: "Sweet", protein: 12, carbs: 28, fat: 10, tag: 'Veg' },
+
+  // HEALTHY
+  { id: 7, name: "Quinoa Shakti Bowl", emoji: "🍲", cal: 410, time: "25 min", category: "Healthy", protein: 20, carbs: 55, fat: 14, tag: 'Veg' },
+  { id: 12, name: "Avocado Garden Wrap", emoji: "🌯", cal: 380, time: "12 min", category: "Healthy", protein: 14, carbs: 42, fat: 18, tag: 'Veg' },
+  { id: 15, name: "Roasted Turmeric Gobi", emoji: "🥦", cal: 260, time: "22 min", category: "Healthy", protein: 10, carbs: 30, fat: 12, tag: 'Veg' },
+];
+
+// Map from pill label → data category string (safe, no string splitting)
+const CATEGORY_MAP = {
+  "All": null,
+  "Bulking 💪": "Bulking",
+  "Dieting 🥗": "Dieting",
+  "Spicy 🌶️": "Spicy",
+  "Sweet 🍰": "Sweet",
+  "Healthy 🥦": "Healthy",
 };
+const CATEGORIES = Object.keys(CATEGORY_MAP);
 
-const calcBMR = (p) => {
-  const w = parseFloat(p.weight) || 70;
-  const h = parseFloat(p.height) || 170;
-  const a = parseFloat(p.age) || 25;
-  const base = p.gender === 'Female'
-    ? 10 * w + 6.25 * h - 5 * a - 161
-    : 10 * w + 6.25 * h - 5 * a + 5;
-  const actMult = { Sedentary: 1.2, Light: 1.375, Moderate: 1.55, Active: 1.725, 'Very Active': 1.9 };
-  const tdee = base * (actMult[p.activity] || 1.55);
-  const goalDelta = { 'Fat Loss': -400, Cutting: -500, Maintenance: 0, 'Muscle Gain': 300, Bulking: 500 };
-  return Math.round(tdee + (goalDelta[p.goal] || 0));
-};
+const GrokRecipeDetail = ({ recipe }) => {
+  const [details, setDetails] = useState(null);
+  const [loading, setLoading] = useState(true);
 
-const calcMacros = (calories, goal) => {
-  const high = ['Muscle Gain', 'Bulking'];
-  const pCal = high.includes(goal) ? 0.35 : 0.30;
-  const fCal = 0.25;
-  const cCal = 1 - pCal - fCal;
-  return {
-    protein: Math.round((calories * pCal) / 4),
-    carbs: Math.round((calories * cCal) / 4),
-    fat: Math.round((calories * fCal) / 9),
+  useEffect(() => {
+    if (!recipe) return;
+    fetchDetails();
+  }, [recipe]);
+
+  const fetchDetails = async () => {
+    try {
+      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${GROQ_API_KEY}`
+        },
+        body: JSON.stringify({
+          model: 'llama-3.3-70b-versatile',
+          messages: [
+            {
+              role: 'system',
+              content: 'Recipe expert. JSON only. No markdown, no backticks.'
+            },
+            {
+              role: 'user',
+              content: `Give ingredients and steps for "${recipe.name}".
+              JSON format only:
+              {
+                "ingredients": ["item 1", "item 2", "item 3"],
+                "steps": ["Step 1 detail", "Step 2 detail", "Step 3 detail"]
+              }`
+            }
+          ],
+          max_tokens: 600,
+          temperature: 0.5
+        })
+      });
+      const data = await response.json();
+      const content = data.choices[0].message.content;
+      const clean = content.replace(/```json|```/g, '').trim();
+      const parsed = JSON.parse(clean);
+      setDetails(parsed);
+    } catch (e) {
+      console.log('Detail fetch error:', e);
+    } finally {
+      setLoading(false);
+    }
   };
-};
 
-const getMealEmoji = (type) =>
-  ({ Breakfast: '🌅', Lunch: '☀️', Snack: '🍎', Dinner: '🌙' }[type] || '🥗');
+  if (loading) return (
+    <View style={{ alignItems: 'center', padding: 20 }}>
+      <ActivityIndicator size="large" color={COLORS.accent} />
+      <Text style={{ color: 'rgba(255,255,255,0.6)', marginTop: 10 }}>
+        Fetching recipe details...
+      </Text>
+    </View>
+  );
 
-// ─── sub-components ───────────────────────────────────────────────────────────
-
-const MacroBar = ({ label, current, total, color }) => {
-  const pct = Math.min((current / (total || 1)) * 100, 100);
   return (
-    <View style={s.macroBarWrap}>
-      <View style={s.macroBarRow}>
-        <Text style={s.macroBarLabel}>{label}</Text>
-        <Text style={s.macroBarVal}>{current}/{total}g</Text>
-      </View>
-      <View style={s.macroBarBg}>
-        <View style={[s.macroBarFill, { width: `${pct}%`, backgroundColor: color }]} />
-      </View>
+    <View>
+      {details?.ingredients && (
+        <View style={styles.modalSection}>
+          <Text style={styles.modalSectionTitle}>🧂 Ingredients</Text>
+          {details.ingredients.map((ing, i) => (
+            <View key={i} style={styles.ingredientRow}>
+              <View style={styles.bulletDot} />
+              <Text style={styles.ingredientText}>{ing}</Text>
+            </View>
+          ))}
+        </View>
+      )}
+      {details?.steps && (
+        <View style={styles.modalSection}>
+          <Text style={styles.modalSectionTitle}>👨‍🍳 How to Make</Text>
+          {details.steps.map((step, i) => (
+            <View key={i} style={styles.stepRow}>
+              <View style={styles.stepNumber}>
+                <Text style={styles.stepNumberText}>{i + 1}</Text>
+              </View>
+              <Text style={styles.stepText}>{step}</Text>
+            </View>
+          ))}
+        </View>
+      )}
     </View>
   );
 };
 
-const MealRow = ({ meal, onDelete }) => (
-  <View style={s.mealRow}>
-    <Text style={s.mealRowEmoji}>{meal.emoji || '🥗'}</Text>
-    <View style={s.mealRowInfo}>
-      <Text style={s.mealRowName} numberOfLines={1}>{meal.name}</Text>
-      <Text style={s.mealRowMeta}>{meal.type} · {meal.time}</Text>
-    </View>
-    <Text style={s.mealRowCal}>{meal.calories} kcal</Text>
-    <TouchableOpacity onPress={onDelete} style={s.mealRowDelete}>
-      <Ionicons name="trash-outline" size={16} color="rgba(255,80,80,0.8)" />
-    </TouchableOpacity>
-  </View>
-);
+const HomeScreen = ({ onRecipeSelect }) => {
+  const [selectedCategory, setSelectedCategory] = useState("All");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [aiRecipes, setAiRecipes] = useState([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [selectedRecipe, setSelectedRecipe] = useState(null);
+  const [modalVisible, setModalVisible] = useState(false);
+  const [vegFilter, setVegFilter] = useState('All');
+  const searchTimeout = useRef(null);
 
-// ─── main screen ──────────────────────────────────────────────────────────────
+  const openYouTubeRecipe = (recipeName) => {
+    if (!recipeName) return;
+    const query = encodeURIComponent(`${recipeName} recipe`);
+    const url = `https://www.youtube.com/results?search_query=${query}`;
+    Linking.openURL(url).catch(err => console.error("Couldn't load page", err));
+  };
 
-const HomeScreen = () => {
-  const [profile, setProfile] = useState(null);
-  const [meals, setMeals] = useState([]);
-  const [streak, setStreak] = useState(0);
-  const [aiTip, setAiTip] = useState('');
-  const [tipLoading, setTipLoading] = useState(false);
-  const [logModal, setLogModal] = useState(false);
-  const [newMeal, setNewMeal] = useState({ name: '', calories: '', type: 'Breakfast' });
+  const getGreeting = () => {
+    const hour = new Date().getHours();
+    if (hour < 12) return "Good Morning 👋";
+    if (hour < 17) return "Good Afternoon ☀️";
+    if (hour < 21) return "Good Evening 🌆";
+    return "Good Night 🌙";
+  };
 
-  const loadData = useCallback(async () => {
+  const handleSearch = async (text, currentVegFilter) => {
+    setSearchQuery(text);
+    const dietPref = currentVegFilter || vegFilter;
+
+    if (text.trim().length < 3) {
+      setAiRecipes([]);
+      return;
+    }
+
+    const localMatch = RECIPES_DATA.filter(r =>
+      r.name.toLowerCase().includes(text.toLowerCase())
+    );
+
+    if (localMatch.length > 0) {
+      setAiRecipes([]);
+      return;
+    }
+
+    setIsSearching(true);
+
     try {
-      const [rawProfile, rawMeals, rawStreak] = await Promise.all([
-        AsyncStorage.getItem('foodigo_user_profile'),
-        AsyncStorage.getItem('foodigo_meal_logs'),
-        AsyncStorage.getItem('foodigo_streak'),
-      ]);
-      if (rawProfile) setProfile(JSON.parse(rawProfile));
-      if (rawMeals) {
-        const all = JSON.parse(rawMeals);
-        const today = new Date().toDateString();
-        setMeals(all.filter(m => new Date(m.date || Date.now()).toDateString() === today));
-      }
-      if (rawStreak) setStreak(parseInt(rawStreak) || 0);
-    } catch (e) { console.warn('loadData:', e); }
-  }, []);
+      console.log('=== GROQ API CALL START ===');
+      const dietPrompt = dietPref === 'All' ? '' : `Respond ONLY with ${dietPref} recipes.`;
 
-  useEffect(() => { loadData(); }, [loadData]);
+      const requestBody = {
+        model: 'llama-3.3-70b-versatile',
+        messages: [
+          {
+            role: 'system',
+            content: `You are a recipe expert. Respond ONLY with JSON. ${dietPrompt}`
+          },
+          {
+            role: 'user',
+            content: `Search recipes for "${text}". Respond in this JSON format only: 
+            {
+              "recipes": [
+                {"id": 101, "name": "Recipe Name", "emoji": "🍱", "cal": 350, "time": "20 min", "category": "Healthy", "tag": "Veg"},
+                ...max 8 recipes
+              ]
+            }`
+          }
+        ],
+        max_tokens: 1000,
+        temperature: 0.5
+      };
 
-  const fetchAiTip = async () => {
-    if (!profile || tipLoading) return;
-    setTipLoading(true);
-    try {
-      const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${GROQ_API_KEY}` },
-        body: JSON.stringify({
-          model: 'llama-3.3-70b-versatile',
-          messages: [
-            { role: 'system', content: 'You are a concise Indian nutrition coach. Give one practical tip in 1-2 sentences. No markdown.' },
-            { role: 'user', content: `User: ${profile.age}y ${profile.gender}, goal: ${profile.goal}, diet: ${profile.diet}. Give one actionable daily nutrition tip.` }
-          ],
-          max_tokens: 120, temperature: 0.7,
-        }),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${GROQ_API_KEY}`
+        },
+        body: JSON.stringify(requestBody)
       });
-      const d = await res.json();
-      setAiTip(d?.choices?.[0]?.message?.content || '');
-    } catch (e) { console.warn('AI tip error:', e); }
-    finally { setTipLoading(false); }
+
+      const rawText = await response.text();
+      if (!response.ok) {
+        setAiRecipes([]);
+        return;
+      }
+
+      let data;
+      try {
+        data = JSON.parse(rawText);
+      } catch (parseErr) {
+        setAiRecipes([]);
+        return;
+      }
+
+      const content = data.choices[0]?.message?.content;
+      if (!content) {
+        setAiRecipes([]);
+        return;
+      }
+
+      let clean = content.replace(/```json|```/g, '').trim();
+      let parsed;
+      try {
+        parsed = JSON.parse(clean);
+      } catch (e) {
+        const jsonMatch = clean.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          try {
+            parsed = JSON.parse(jsonMatch[0]);
+          } catch (e2) {
+            setAiRecipes([]);
+            return;
+          }
+        } else {
+          setAiRecipes([]);
+          return;
+        }
+      }
+
+      if (parsed.recipes && Array.isArray(parsed.recipes)) {
+        setAiRecipes(parsed.recipes);
+      } else {
+        setAiRecipes([]);
+      }
+
+    } catch (e) {
+      console.log('Error:', e);
+    } finally {
+      setIsSearching(false);
+    }
   };
 
-  const logMeal = async () => {
-    if (!newMeal.name || !newMeal.calories) return;
-    const meal = {
-      id: Date.now(),
-      name: newMeal.name.trim(),
-      calories: parseInt(newMeal.calories) || 0,
-      type: newMeal.type,
-      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      emoji: getMealEmoji(newMeal.type),
-      date: new Date().toISOString(),
-    };
-    try {
-      const raw = await AsyncStorage.getItem('foodigo_meal_logs');
-      const all = raw ? JSON.parse(raw) : [];
-      const updated = [meal, ...all];
-      await AsyncStorage.setItem('foodigo_meal_logs', JSON.stringify(updated));
-      // update streak
-      const newStreak = streak + 1;
-      setStreak(newStreak);
-      await AsyncStorage.setItem('foodigo_streak', String(newStreak));
-      setMeals(prev => [meal, ...prev]);
-      setLogModal(false);
-      setNewMeal({ name: '', calories: '', type: 'Breakfast' });
-    } catch (e) { console.warn('logMeal:', e); }
+  const handleRecipePress = (recipe) => {
+    console.log('Recipe pressed:', recipe.name);
+    setSelectedRecipe(recipe);
+    setModalVisible(true);
   };
 
-  const deleteMeal = async (id) => {
-    try {
-      const raw = await AsyncStorage.getItem('foodigo_meal_logs');
-      const all = raw ? JSON.parse(raw) : [];
-      const updated = all.filter(m => m.id !== id);
-      await AsyncStorage.setItem('foodigo_meal_logs', JSON.stringify(updated));
-      setMeals(prev => prev.filter(m => m.id !== id));
-    } catch (e) { console.warn('deleteMeal:', e); }
-  };
+  const displayRecipes = useMemo(() => {
+    // AI search results override everything
+    if (searchQuery.trim().length >= 3 && aiRecipes.length > 0) {
+      return aiRecipes;
+    }
 
-  const targetCal = profile ? calcBMR(profile) : 2000;
-  const macros = calcMacros(targetCal, profile?.goal || 'Maintenance');
-  const consumedCal = meals.reduce((a, m) => a + (parseInt(m.calories) || 0), 0);
-  const calPct = Math.min((consumedCal / targetCal) * 100, 100);
-  const remaining = Math.max(targetCal - consumedCal, 0);
+    let results = RECIPES_DATA;
+
+    // Category filter — use CATEGORY_MAP for safe lookup
+    const categoryFilter = CATEGORY_MAP[selectedCategory];
+    if (categoryFilter) {
+      results = results.filter(r => r.category === categoryFilter);
+    }
+
+    // Veg/Non-Veg filter
+    if (vegFilter === 'Veg') {
+      results = results.filter(r => r.tag === 'Veg');
+    } else if (vegFilter === 'Non-Veg') {
+      results = results.filter(r => r.tag === 'Non-Veg');
+    }
+
+    // Text search filter
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      results = results.filter(r => r.name.toLowerCase().includes(q));
+    }
+
+    return results;
+  }, [searchQuery, selectedCategory, aiRecipes, vegFilter]);
 
   return (
-    <SafeAreaView style={s.container} edges={['top']}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.scroll}>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+        // ── Smooth scrolling ──────────────────────────────────────────────
+        decelerationRate="normal"          // natural momentum feel
+        scrollEventThrottle={16}           // 60 fps scroll events
+        overScrollMode="never"             // removes Android overscroll jank
+      >
 
-        {/* ── Header ── */}
-        <Animated.View entering={FadeInUp.duration(500)} style={s.header}>
+        {/* Header */}
+        <Animated.View
+          entering={FadeInDown.duration(500).springify().damping(18)}
+          style={styles.header}
+        >
           <View>
-            <Text style={s.greeting}>{getGreeting()}</Text>
-            <Text style={s.name}>{profile?.name || 'Foodigo User'} 🍽️</Text>
+            <Text style={styles.subtitle}>{getGreeting()}</Text>
+            <Text style={styles.title}>What are you{"\n"}cooking today?</Text>
           </View>
-          <TouchableOpacity style={s.avatarBtn}>
-            <Text style={s.avatarEmoji}>👨‍🍳</Text>
+          <View style={styles.headerIcons}>
+            <TouchableOpacity style={styles.iconButton} activeOpacity={0.65}>
+              <Ionicons name="notifications-outline" size={24} color="white" />
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.avatar} activeOpacity={0.65}>
+              <Text style={styles.avatarEmoji}>👨‍🍳</Text>
+            </TouchableOpacity>
+          </View>
+        </Animated.View>
+
+        {/* Search Bar */}
+        <Animated.View
+          entering={FadeInDown.delay(80).duration(500).springify().damping(18)}
+          style={styles.searchContainer}
+        >
+          <View style={styles.searchWrapper}>
+            {Platform.OS === 'ios' ? (
+              <BlurView intensity={25} tint="light" style={styles.searchBlur} />
+            ) : (
+              <View style={[styles.searchBlur, { backgroundColor: 'rgba(255, 255, 255, 0.12)' }]} />
+            )}
+            <View style={styles.searchContent}>
+              <Ionicons name="search" size={20} color={COLORS.textSecondary} />
+              <TextInput
+                placeholder="Search recipes, ingredients..."
+                placeholderTextColor={COLORS.textSecondary}
+                style={styles.searchInput}
+                value={searchQuery}
+                onChangeText={(text) => {
+                  setSearchQuery(text);
+                  if (searchTimeout.current) clearTimeout(searchTimeout.current);
+                  // ── Reduced debounce from 800 ms → 500 ms for snappier feel ──
+                  searchTimeout.current = setTimeout(() => handleSearch(text), 500);
+                }}
+              />
+              {isSearching && <ActivityIndicator size="small" color={COLORS.accent} />}
+            </View>
+          </View>
+        </Animated.View>
+
+        {/* Veg/Non-Veg Filter */}
+        <Animated.View
+          entering={FadeInDown.delay(140).duration(500).springify().damping(18)}
+          style={styles.vegFilterRow}
+        >
+          {['All', 'Veg', 'Non-Veg'].map((type) => (
+            <TouchableOpacity
+              key={type}
+              style={[styles.vegPill, vegFilter === type && styles.vegPillSelected]}
+              activeOpacity={0.7}
+              onPress={() => {
+                setVegFilter(type);
+                if (searchQuery.length >= 3) handleSearch(searchQuery, type);
+              }}
+            >
+              <Text style={[styles.vegPillText, vegFilter === type && styles.vegPillTextSelected]}>
+                {type}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </Animated.View>
+
+        {/* Hero Banner */}
+        <Animated.View
+          entering={FadeInDown.delay(180).duration(500).springify().damping(18)}
+        >
+          <TouchableOpacity style={styles.heroContainer} activeOpacity={0.88}>
+            <LinearGradient
+              colors={[COLORS.accent, COLORS.secondaryAccent]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.heroGradient}
+            >
+              <View style={styles.heroContent}>
+                <View style={styles.heroTextContainer}>
+                  <Text style={styles.heroTitle}>Explore Healthy &{"\n"}Tasty Food 🍜</Text>
+                  <Text style={styles.heroSubtitle}>500+ recipes available</Text>
+                </View>
+                <Text style={styles.heroEmoji}>🥗</Text>
+              </View>
+            </LinearGradient>
           </TouchableOpacity>
         </Animated.View>
 
-        {/* ── Calorie Ring Card ── */}
-        <Animated.View entering={FadeInUp.delay(100).duration(500)}>
-          <LinearGradient colors={['#0A4A3E', '#062E27']} style={s.calorieCard}>
-            <View style={s.calRingOuter}>
-              <View style={s.calRingInner}>
-                <Text style={s.calConsumed}>{consumedCal}</Text>
-                <Text style={s.calLabel}>kcal eaten</Text>
-              </View>
-            </View>
-            <View style={s.calRight}>
-              <Text style={s.calTitle}>Today's Calories</Text>
-              <View style={s.calBarBg}>
-                <View style={[s.calBarFill, { width: `${calPct}%` }]} />
-              </View>
-              <Text style={s.calRemain}>{remaining} kcal remaining</Text>
-              <Text style={s.calTarget}>Target: {targetCal} kcal</Text>
-
-              {profile && (
-                <View style={s.goalBadge}>
-                  <Text style={s.goalBadgeText}>🎯 {profile.goal}</Text>
-                </View>
-              )}
-            </View>
-          </LinearGradient>
+        {/* Category Pills */}
+        <Animated.View
+          entering={FadeInDown.delay(240).duration(500).springify().damping(18)}
+        >
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.categoriesContainer}
+            contentContainerStyle={styles.categoriesContent}
+            // ── Snappy pill scrolling ──────────────────────────────────────
+            decelerationRate="fast"
+            overScrollMode="never"
+          >
+            {CATEGORIES.map((cat) => (
+              <CategoryPill
+                key={cat}
+                category={cat}
+                isSelected={selectedCategory === cat}
+                onPress={() => setSelectedCategory(cat)}
+              />
+            ))}
+          </ScrollView>
         </Animated.View>
 
-        {/* ── Macros ── */}
-        <Animated.View entering={FadeInUp.delay(180).duration(500)} style={s.card}>
-          <Text style={s.sectionTitle}>Macro Targets</Text>
-          <MacroBar label="Protein" current={0} total={macros.protein} color="#FF6B35" />
-          <MacroBar label="Carbs"   current={0} total={macros.carbs}   color="#F5A623" />
-          <MacroBar label="Fat"     current={0} total={macros.fat}     color="#4CAF50" />
-          <Text style={s.macroNote}>* Track meals below to fill progress bars</Text>
-        </Animated.View>
-
-        {/* ── AI Tip ── */}
-        <Animated.View entering={FadeInUp.delay(260).duration(500)} style={s.tipCard}>
-          <View style={s.tipHeader}>
-            <Ionicons name="sparkles" size={18} color="#F5A623" />
-            <Text style={s.tipTitle}>AI Nutrition Tip</Text>
-          </View>
-          {aiTip ? (
-            <Text style={s.tipText}>{aiTip}</Text>
-          ) : (
-            <TouchableOpacity style={s.tipBtn} onPress={fetchAiTip} disabled={tipLoading}>
-              {tipLoading
-                ? <ActivityIndicator size="small" color={COLORS.accent} />
-                : <Text style={s.tipBtnText}>Get Today's Tip ✨</Text>}
-            </TouchableOpacity>
-          )}
-          {aiTip ? (
-            <TouchableOpacity onPress={() => { setAiTip(''); fetchAiTip(); }} style={{ marginTop: 10 }}>
-              <Text style={{ color: COLORS.accent, fontSize: 12 }}>Refresh tip 🔄</Text>
-            </TouchableOpacity>
-          ) : null}
-        </Animated.View>
-
-        {/* ── Streak ── */}
-        <Animated.View entering={FadeInUp.delay(340).duration(500)} style={s.streakCard}>
-          <Text style={s.streakEmoji}>🔥</Text>
-          <View style={{ flex: 1 }}>
-            <Text style={s.streakTitle}>{streak} Day Streak!</Text>
-            <Text style={s.streakSub}>Keep logging your meals every day</Text>
-          </View>
-          <View style={s.streakBadge}><Text style={s.streakBadgeText}>Active</Text></View>
-        </Animated.View>
-
-        {/* ── Today's Meals ── */}
-        <Animated.View entering={FadeInUp.delay(420).duration(500)}>
-          <View style={s.sectionRow}>
-            <Text style={s.sectionTitle}>Today's Meals 🍽️</Text>
-            <TouchableOpacity style={s.addBtn} onPress={() => setLogModal(true)}>
-              <Ionicons name="add-circle" size={28} color={COLORS.accent} />
+        {/* Recommended Section */}
+        <Animated.View
+          entering={FadeInDown.delay(300).duration(500).springify().damping(18)}
+        >
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Recommended</Text>
+            <TouchableOpacity activeOpacity={0.7}>
+              <Text style={styles.seeAll}>See All</Text>
             </TouchableOpacity>
           </View>
 
-          <View style={s.card}>
-            {meals.length === 0 ? (
-              <View style={s.emptyMeals}>
-                <Text style={s.emptyMealsIcon}>🥗</Text>
-                <Text style={s.emptyMealsText}>No meals logged today</Text>
-                <TouchableOpacity style={s.logNowBtn} onPress={() => setLogModal(true)}>
-                  <Text style={s.logNowText}>Log your first meal</Text>
+          <FlatList
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            data={displayRecipes}
+            keyExtractor={(item, index) => item.id?.toString() || index.toString()}
+            renderItem={({ item, index }) => (
+              <Animated.View
+                entering={FadeInDown.delay(340 + index * 60).duration(400).springify().damping(16)}
+              >
+                <TouchableOpacity onPress={() => handleRecipePress(item)} activeOpacity={0.82}>
+                  <RecipeCard
+                    item={item}
+                    onPlayVideo={openYouTubeRecipe}
+                  />
                 </TouchableOpacity>
-              </View>
-            ) : (
-              meals.map(m => (
-                <MealRow key={m.id} meal={m} onDelete={() => deleteMeal(m.id)} />
-              ))
+              </Animated.View>
             )}
+            contentContainerStyle={styles.recipesList}
+            // ── Smooth horizontal card scrolling ──────────────────────────
+            decelerationRate="fast"
+            snapToAlignment="start"
+            removeClippedSubviews={true}
+            overScrollMode="never"
+            initialNumToRender={4}
+            maxToRenderPerBatch={4}
+            windowSize={5}
+          />
+        </Animated.View>
+
+        {/* Trending Section */}
+        <Animated.View
+          entering={FadeInDown.delay(420).duration(500).springify().damping(18)}
+        >
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Trending Recipes</Text>
+            <TouchableOpacity activeOpacity={0.7}>
+              <Text style={styles.seeAll}>See All</Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.trendingContainer}>
+            {displayRecipes.slice(0, 3).map((item, index) => (
+              <Animated.View
+                key={item.id}
+                entering={FadeInDown.delay(460 + index * 70).duration(400).springify().damping(16)}
+              >
+                <TouchableOpacity onPress={() => handleRecipePress(item)} activeOpacity={0.82}>
+                  <TrendingItem
+                    item={item}
+                    onPlayVideo={openYouTubeRecipe}
+                  />
+                </TouchableOpacity>
+              </Animated.View>
+            ))}
           </View>
         </Animated.View>
 
-        {/* ── Profile Prompt if no profile ── */}
-        {!profile && (
-          <Animated.View entering={FadeInDown.delay(500)} style={s.profilePrompt}>
-            <Text style={s.promptEmoji}>👤</Text>
-            <Text style={s.promptTitle}>Set Up Your Profile</Text>
-            <Text style={s.promptSub}>
-              Go to the Profile tab to enter your health details and get personalized targets.
-            </Text>
-          </Animated.View>
-        )}
-
-        <View style={{ height: 120 }} />
+        <View style={{ height: 100 }} />
       </ScrollView>
 
-      {/* ── Log Meal Modal ── */}
-      <Modal visible={logModal} animationType="slide" transparent onRequestClose={() => setLogModal(false)}>
-        <View style={s.modalOverlay}>
-          <View style={s.modalSheet}>
-            <View style={s.modalHandle} />
-            <Text style={s.modalTitle}>Log a Meal 🍽️</Text>
+      {/* Recipe Detail Modal */}
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={modalVisible}
+        onRequestClose={() => setModalVisible(false)}
+        // ── Faster modal presentation ──────────────────────────────────────
+        presentationStyle="overFullScreen"
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            {selectedRecipe && (
+              <>
+                <View style={styles.modalHeader}>
+                  <TouchableOpacity
+                    onPress={() => setModalVisible(false)}
+                    style={styles.closeButton}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons name="close" size={24} color="white" />
+                  </TouchableOpacity>
+                  <Text style={styles.modalTitle} numberOfLines={1}>{selectedRecipe.name}</Text>
+                  <TouchableOpacity style={styles.heartButton} activeOpacity={0.7}>
+                    <Ionicons name="heart-outline" size={24} color="white" />
+                  </TouchableOpacity>
+                </View>
 
-            <TextInput
-              placeholder="What did you eat?"
-              placeholderTextColor={COLORS.textSecondary}
-              style={s.input}
-              value={newMeal.name}
-              onChangeText={v => setNewMeal(p => ({ ...p, name: v }))}
-            />
-            <TextInput
-              placeholder="Calories (kcal)"
-              placeholderTextColor={COLORS.textSecondary}
-              style={s.input}
-              keyboardType="numeric"
-              value={newMeal.calories}
-              onChangeText={v => setNewMeal(p => ({ ...p, calories: v }))}
-            />
-
-            <View style={s.mealTypeRow}>
-              {['Breakfast', 'Lunch', 'Snack', 'Dinner'].map(t => (
-                <TouchableOpacity
-                  key={t}
-                  style={[s.typePill, newMeal.type === t && s.typePillActive]}
-                  onPress={() => setNewMeal(p => ({ ...p, type: t }))}
+                <ScrollView
+                  showsVerticalScrollIndicator={false}
+                  decelerationRate="normal"
+                  scrollEventThrottle={16}
+                  overScrollMode="never"
                 >
-                  <Text style={[s.typePillText, newMeal.type === t && s.typePillTextActive]}>{t}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
+                  <View style={styles.modalHero}>
+                    <Text style={styles.modalEmoji}>{selectedRecipe.emoji}</Text>
+                    <View style={styles.modalStats}>
+                      <View style={styles.modalStatItem}>
+                        <Text style={styles.modalStatVal}>{selectedRecipe.cal}</Text>
+                        <Text style={styles.modalStatLab}>Calories</Text>
+                      </View>
+                      <View style={styles.modalStatDivider} />
+                      <View style={styles.modalStatItem}>
+                        <Text style={styles.modalStatVal}>{selectedRecipe.time}</Text>
+                        <Text style={styles.modalStatLab}>Cook Time</Text>
+                      </View>
+                    </View>
+                  </View>
 
-            <TouchableOpacity style={s.logBtn} onPress={logMeal}>
-              <LinearGradient colors={[COLORS.accent, COLORS.secondaryAccent]} style={s.logBtnGrad}>
-                <Text style={s.logBtnText}>Save Meal</Text>
-              </LinearGradient>
-            </TouchableOpacity>
+                  <GrokRecipeDetail recipe={selectedRecipe} />
 
-            <TouchableOpacity style={s.cancelBtn} onPress={() => setLogModal(false)}>
-              <Text style={s.cancelBtnText}>Cancel</Text>
-            </TouchableOpacity>
+                  {/* YouTube Button */}
+                  <TouchableOpacity
+                    style={styles.youtubeButton}
+                    onPress={() => openYouTubeRecipe(selectedRecipe.name)}
+                    activeOpacity={0.82}
+                  >
+                    <Ionicons name="logo-youtube" size={20} color="white" />
+                    <Text style={styles.youtubeButtonText}>
+                      Watch on YouTube
+                    </Text>
+                  </TouchableOpacity>
+
+                  <View style={{ height: 50 }} />
+                </ScrollView>
+              </>
+            )}
           </View>
         </View>
       </Modal>
@@ -349,97 +596,329 @@ const HomeScreen = () => {
   );
 };
 
-// ─── styles ───────────────────────────────────────────────────────────────────
-
-const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: COLORS.primary },
-  scroll: { paddingHorizontal: SIZES.padding, paddingTop: 10 },
-
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 },
-  greeting: { color: COLORS.textSecondary, fontSize: 14, fontWeight: '500' },
-  name: { color: 'white', fontSize: 22, fontWeight: 'bold', marginTop: 2 },
-  avatarBtn: { width: 46, height: 46, borderRadius: 23, backgroundColor: 'rgba(255,255,255,0.15)', justifyContent: 'center', alignItems: 'center' },
-  avatarEmoji: { fontSize: 24 },
-
-  calorieCard: {
-    borderRadius: 24, padding: 20, flexDirection: 'row',
-    alignItems: 'center', marginBottom: 20, gap: 20, ...SHADOWS.medium,
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: COLORS.primary,
   },
-  calRingOuter: { width: 100, height: 100, borderRadius: 50, borderWidth: 8, borderColor: COLORS.accent, justifyContent: 'center', alignItems: 'center' },
-  calRingInner: { alignItems: 'center' },
-  calConsumed: { color: 'white', fontSize: 20, fontWeight: 'bold' },
-  calLabel: { color: COLORS.textSecondary, fontSize: 10 },
-  calRight: { flex: 1 },
-  calTitle: { color: 'white', fontSize: 16, fontWeight: 'bold', marginBottom: 10 },
-  calBarBg: { height: 8, backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 4, overflow: 'hidden', marginBottom: 6 },
-  calBarFill: { height: '100%', backgroundColor: COLORS.accent, borderRadius: 4 },
-  calRemain: { color: COLORS.textSecondary, fontSize: 12 },
-  calTarget: { color: COLORS.textSecondary, fontSize: 12, marginTop: 2 },
-  goalBadge: { marginTop: 8, backgroundColor: 'rgba(245,166,35,0.2)', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4, alignSelf: 'flex-start' },
-  goalBadgeText: { color: COLORS.accent, fontSize: 12, fontWeight: '600' },
-
-  card: { backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 20, padding: 18, marginBottom: 20, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
-  sectionTitle: { color: 'white', fontSize: 18, fontWeight: 'bold', marginBottom: 14 },
-
-  macroBarWrap: { marginBottom: 12 },
-  macroBarRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 },
-  macroBarLabel: { color: COLORS.textSecondary, fontSize: 13 },
-  macroBarVal: { color: 'white', fontSize: 13, fontWeight: '600' },
-  macroBarBg: { height: 8, backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 4, overflow: 'hidden' },
-  macroBarFill: { height: '100%', borderRadius: 4 },
-  macroNote: { color: COLORS.textSecondary, fontSize: 10, marginTop: 4, fontStyle: 'italic' },
-
-  tipCard: { backgroundColor: 'rgba(245,166,35,0.1)', borderRadius: 20, padding: 18, marginBottom: 20, borderWidth: 1, borderColor: 'rgba(245,166,35,0.3)' },
-  tipHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
-  tipTitle: { color: COLORS.accent, fontSize: 15, fontWeight: 'bold' },
-  tipText: { color: 'rgba(255,255,255,0.85)', fontSize: 14, lineHeight: 22 },
-  tipBtn: { backgroundColor: COLORS.accent, borderRadius: 12, paddingVertical: 12, alignItems: 'center' },
-  tipBtnText: { color: 'white', fontWeight: 'bold', fontSize: 14 },
-
-  streakCard: { backgroundColor: 'rgba(255,100,0,0.1)', borderRadius: 20, padding: 18, marginBottom: 20, flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1, borderColor: 'rgba(255,100,0,0.3)' },
-  streakEmoji: { fontSize: 36 },
-  streakTitle: { color: 'white', fontSize: 16, fontWeight: 'bold' },
-  streakSub: { color: COLORS.textSecondary, fontSize: 12, marginTop: 2 },
-  streakBadge: { backgroundColor: '#FF6B35', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 4 },
-  streakBadgeText: { color: 'white', fontSize: 11, fontWeight: 'bold' },
-
-  sectionRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
-  addBtn: { padding: 4 },
-
-  mealRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.06)' },
-  mealRowEmoji: { fontSize: 26, marginRight: 12 },
-  mealRowInfo: { flex: 1 },
-  mealRowName: { color: 'white', fontSize: 14, fontWeight: '600' },
-  mealRowMeta: { color: COLORS.textSecondary, fontSize: 11, marginTop: 2 },
-  mealRowCal: { color: COLORS.accent, fontSize: 13, fontWeight: 'bold', marginRight: 10 },
-  mealRowDelete: { padding: 6 },
-
-  emptyMeals: { alignItems: 'center', paddingVertical: 20 },
-  emptyMealsIcon: { fontSize: 40, marginBottom: 8 },
-  emptyMealsText: { color: COLORS.textSecondary, fontSize: 14 },
-  logNowBtn: { marginTop: 14, backgroundColor: COLORS.accent, borderRadius: 12, paddingHorizontal: 20, paddingVertical: 10 },
-  logNowText: { color: 'white', fontWeight: 'bold', fontSize: 13 },
-
-  profilePrompt: { backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 20, padding: 24, alignItems: 'center', marginBottom: 20, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
-  promptEmoji: { fontSize: 40, marginBottom: 10 },
-  promptTitle: { color: 'white', fontSize: 16, fontWeight: 'bold', marginBottom: 6 },
-  promptSub: { color: COLORS.textSecondary, fontSize: 13, textAlign: 'center', lineHeight: 20 },
-
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
-  modalSheet: { backgroundColor: '#0D4A3E', borderTopLeftRadius: 30, borderTopRightRadius: 30, padding: 24, paddingBottom: 50 },
-  modalHandle: { width: 40, height: 4, backgroundColor: 'rgba(255,255,255,0.3)', borderRadius: 2, alignSelf: 'center', marginBottom: 20 },
-  modalTitle: { color: 'white', fontSize: 20, fontWeight: 'bold', marginBottom: 20 },
-  input: { backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 14, padding: 14, color: 'white', fontSize: 15, marginBottom: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
-  mealTypeRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20, gap: 8 },
-  typePill: { flex: 1, paddingVertical: 10, borderRadius: 12, alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.08)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
-  typePillActive: { backgroundColor: COLORS.accent, borderColor: COLORS.accent },
-  typePillText: { color: COLORS.textSecondary, fontSize: 11, fontWeight: '600' },
-  typePillTextActive: { color: 'white' },
-  logBtn: { borderRadius: 15, overflow: 'hidden', marginBottom: 12 },
-  logBtnGrad: { paddingVertical: 16, alignItems: 'center' },
-  logBtnText: { color: 'white', fontSize: 16, fontWeight: 'bold' },
-  cancelBtn: { alignItems: 'center', paddingVertical: 8 },
-  cancelBtnText: { color: COLORS.textSecondary, fontSize: 14 },
+  scrollContent: {
+    paddingBottom: 20,
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingTop: 20,
+  },
+  subtitle: {
+    color: COLORS.textSecondary,
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  title: {
+    color: 'white',
+    fontSize: 28,
+    fontWeight: 'bold',
+    marginTop: 4,
+  },
+  headerIcons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  iconButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  avatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: COLORS.accent,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.2)',
+  },
+  avatarEmoji: {
+    fontSize: 24,
+  },
+  searchContainer: {
+    paddingHorizontal: 20,
+    marginTop: 25,
+  },
+  searchWrapper: {
+    height: 55,
+    borderRadius: 27.5,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+  },
+  searchBlur: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
+  searchContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 15,
+    height: 55,
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+  },
+  searchInput: {
+    flex: 1,
+    color: 'white',
+    fontSize: 16,
+    marginLeft: 10,
+  },
+  heroContainer: {
+    paddingHorizontal: 20,
+    marginTop: 25,
+  },
+  heroGradient: {
+    borderRadius: SIZES.radiusBanner,
+    padding: 20,
+    height: 140,
+  },
+  heroContent: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    height: '100%',
+  },
+  heroTextContainer: {
+    flex: 1,
+  },
+  heroTitle: {
+    color: 'white',
+    fontSize: 22,
+    fontWeight: 'bold',
+    lineHeight: 28,
+  },
+  heroSubtitle: {
+    color: 'rgba(255,255,255,0.8)',
+    fontSize: 14,
+    marginTop: 8,
+  },
+  heroEmoji: {
+    fontSize: 60,
+  },
+  categoriesContainer: {
+    marginTop: 25,
+  },
+  categoriesContent: {
+    paddingHorizontal: 20,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    marginTop: 30,
+    marginBottom: 15,
+  },
+  sectionTitle: {
+    color: 'white',
+    fontSize: 20,
+    fontWeight: 'bold',
+  },
+  seeAll: {
+    color: COLORS.accent,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  recipesList: {
+    paddingLeft: 20,
+    paddingRight: 10,
+  },
+  trendingContainer: {
+    paddingHorizontal: 20,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: COLORS.primary,
+    borderTopLeftRadius: 30,
+    borderTopRightRadius: 30,
+    height: '90%',
+    padding: 20,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  closeButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalTitle: {
+    color: 'white',
+    fontSize: 18,
+    fontWeight: 'bold',
+    flex: 1,
+    textAlign: 'center',
+    marginHorizontal: 10,
+  },
+  heartButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalHero: {
+    alignItems: 'center',
+    marginVertical: 20,
+  },
+  modalEmoji: {
+    fontSize: 80,
+    marginBottom: 20,
+  },
+  modalStats: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: 20,
+    padding: 15,
+    width: '100%',
+    justifyContent: 'space-around',
+    alignItems: 'center',
+  },
+  modalStatItem: {
+    alignItems: 'center',
+  },
+  modalStatVal: {
+    color: 'white',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  modalStatLab: {
+    color: COLORS.textSecondary,
+    fontSize: 12,
+    marginTop: 4,
+  },
+  modalStatDivider: {
+    width: 1,
+    height: 30,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+  },
+  modalSection: {
+    marginTop: 25,
+  },
+  modalSectionTitle: {
+    color: 'white',
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 15,
+  },
+  ingredientRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  bulletDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#F5A623',
+    marginRight: 10,
+  },
+  ingredientText: {
+    color: 'rgba(255,255,255,0.85)',
+    fontSize: 14,
+  },
+  stepRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: 12,
+  },
+  stepNumber: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: '#F5A623',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 10,
+    marginTop: 1,
+  },
+  stepNumberText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  stepText: {
+    flex: 1,
+    color: 'rgba(255,255,255,0.85)',
+    fontSize: 14,
+    lineHeight: 21,
+  },
+  youtubeButton: {
+    backgroundColor: '#FF0000',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    borderRadius: 18,
+    marginTop: 20,
+    gap: 8,
+    ...SHADOWS.medium,
+  },
+  youtubeButtonText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  vegFilterRow: {
+    flexDirection: 'row',
+    paddingHorizontal: 20,
+    marginBottom: 20,
+    gap: 10,
+  },
+  vegPill: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 25,
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+  },
+  vegPillSelected: {
+    backgroundColor: '#F5A623',
+    borderColor: '#F5A623',
+  },
+  vegPillText: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  vegPillTextSelected: {
+    color: '#FFFFFF',
+    fontWeight: 'bold',
+  },
 });
 
 export default HomeScreen;

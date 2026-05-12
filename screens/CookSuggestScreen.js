@@ -10,7 +10,9 @@ import {
   ActivityIndicator,
   Dimensions,
   Platform,
-  Alert
+  Alert,
+  Modal,
+  Linking
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { COLORS, SIZES, SHADOWS } from '../constants/theme';
@@ -18,80 +20,97 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { callGroqAPI } from '../utils/api';
-import Animated, { FadeInUp, FadeIn, Layout } from 'react-native-reanimated';
-import SkeletonCard from '../components/SkeletonCard';
+import Animated, { FadeInUp, FadeIn, Layout, SlideInDown } from 'react-native-reanimated';
 
-const { width } = Dimensions.get('window');
+const { width, height } = Dimensions.get('window');
 
-const FALLBACK_RECIPES = [
-  { name: "Scrambled Eggs with Toast", emoji: "🍳", calories: 350, cookTime: "10 min", difficulty: "Easy", matchPercent: 95, haveIngredients: ["eggs", "bread", "butter"], needIngredients: ["salt", "pepper"], steps: ["Crack eggs into bowl", "Whisk with salt/pepper", "Heat butter in pan", "Cook eggs while stirring", "Toast bread"], category: 'Cook' },
-  { name: "One-Pot Tomato Pasta", emoji: "🍝", calories: 450, cookTime: "20 min", difficulty: "Easy", matchPercent: 88, haveIngredients: ["pasta", "tomatoes", "garlic"], needIngredients: ["olive oil", "basil"], steps: ["Boil water", "Cook pasta", "Sauté garlic", "Add tomatoes", "Mix with pasta"], category: 'Cook' },
-  { name: "Simple Vegetable Stir-Fry", emoji: "🥦", calories: 300, cookTime: "15 min", difficulty: "Easy", matchPercent: 92, haveIngredients: ["broccoli", "carrots", "soy sauce"], needIngredients: ["ginger", "oil"], steps: ["Chop veggies", "Heat oil", "Stir fry for 5 mins", "Add sauce"], category: 'Cook' },
-  { name: "Tuna Salad Wrap", emoji: "🌯", calories: 400, cookTime: "5 min", difficulty: "Easy", matchPercent: 90, haveIngredients: ["tuna", "tortilla", "mayo"], needIngredients: ["onion"], steps: ["Mix tuna with mayo", "Spread on tortilla", "Roll up"], category: 'Cook' }
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const COOK_CATEGORIES = [
+  { id: 'breakfast', label: 'Breakfast', emoji: '🍳' },
+  { id: 'lunch',     label: 'Lunch',     emoji: '🍱' },
+  { id: 'dinner',    label: 'Dinner',    emoji: '🍽️' },
+  { id: 'snacks',    label: 'Snacks',    emoji: '🥪' },
+  { id: 'healthy',   label: 'Healthy',   emoji: '🥗' },
+  { id: 'protein',   label: 'High Protein', emoji: '💪' },
+  { id: 'veg',       label: 'Veg',       emoji: '🥦' },
+  { id: 'non-veg',   label: 'Non-Veg',   emoji: '🍗' },
+  { id: 'vegan',     label: 'Vegan',     emoji: '🌱' },
+  { id: 'quick',     label: 'Quick Meals', emoji: '⚡' },
+  { id: 'indian',    label: 'Indian',    emoji: '🇮🇳' },
+  { id: 'gym',       label: 'Gym Meals', emoji: '🏋️' },
 ];
 
-const moods = [
-  { id: 'spicy', label: 'Spicy & Hot', emoji: '🌶️' },
-  { id: 'sweet', label: 'Sweet & Dessert', emoji: '🍰' },
-  { id: 'healthy', label: 'Light & Healthy', emoji: '🥗' },
-  { id: 'hearty', label: 'Hearty & Filling', emoji: '🍖' },
-  { id: 'comfort', label: 'Comfort Food', emoji: '🍜' },
-  { id: 'quick', label: 'Quick (< 15 min)', emoji: '⚡' },
+const QUICK_INGREDIENTS = [
+  'onion', 'tomato', 'paneer', 'egg', 'rice', 'chicken', 'milk', 'bread', 'potato', 'garlic', 'ginger', 'chilli'
 ];
-
-const dietaryOptions = ["Any", "Veg Only", "Non-Veg", "Low Calorie", "High Protein"];
 
 const getDiffColor = (diff) => {
-  switch(diff) {
-    case 'Easy': return '#4CAF50';
-    case 'Medium': return '#F5A623';
-    case 'Hard': return '#FF5252';
-    default: return COLORS.accent;
-  }
+  const d = (diff || '').toLowerCase();
+  if (d.includes('easy')) return '#4CAF50';
+  if (d.includes('medium')) return '#F5A623';
+  if (d.includes('hard')) return '#FF5252';
+  return COLORS.accent;
 };
 
-const RecipeResultCard = ({ recipe, onPress }) => {
-  return (
-    <Animated.View entering={FadeInUp.duration(400)} layout={Layout.springify()}>
-      <TouchableOpacity onPress={onPress} activeOpacity={0.9}>
-        <View style={styles.resultCard}>
-          <View style={[StyleSheet.absoluteFill, { borderRadius: 20, overflow: 'hidden' }]}>
-            {Platform.OS === 'ios' ? <BlurView intensity={25} tint="light" style={StyleSheet.absoluteFill} /> : <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(255, 255, 255, 0.15)' }]} />}
-          </View>
-          <View style={styles.cardContent}>
-            <View style={styles.cardHeader}>
-              <Text style={styles.recipeEmoji}>{recipe.emoji || '🥘'}</Text>
-              <View style={styles.headerInfo}>
-                <View style={styles.titleRow}>
-                  <Text style={styles.recipeName}>{recipe.name || 'AI Recipe'}</Text>
-                  <View style={styles.matchBadge}><Text style={styles.matchText}>{recipe.matchPercent || 0}% match</Text></View>
-                </View>
-                <View style={styles.difficultyRow}>
-                  <View style={[styles.diffBadge, { backgroundColor: getDiffColor(recipe.difficulty) }]}><Text style={styles.diffText}>{recipe.difficulty || 'Easy'}</Text></View>
-                  <Text style={styles.recipeMeta}>{recipe.calories || 0} cal • {recipe.cookTime || '15m'}</Text>
-                </View>
-              </View>
-            </View>
-            <View style={styles.expandButton}>
-              <Text style={styles.expandText}>View Full Recipe</Text>
-              <Ionicons name="chevron-forward" size={18} color={COLORS.accent} />
-            </View>
+// ─── Sub-Components ───────────────────────────────────────────────────────────
+
+const RecipeCard = ({ recipe, onPress }) => (
+  <Animated.View entering={FadeInUp.duration(400)} layout={Layout.springify()}>
+    <TouchableOpacity style={s.recipeCard} onPress={onPress} activeOpacity={0.9}>
+      <View style={s.cardEmojiBg}>
+        <Text style={s.cardEmoji}>{recipe.emoji || '🥘'}</Text>
+      </View>
+      <View style={s.cardInfo}>
+        <View style={s.cardHeader}>
+          <Text style={s.cardTitle} numberOfLines={1}>{recipe.name}</Text>
+          <View style={[s.typeBadge, { backgroundColor: recipe.isVeg ? 'rgba(76, 175, 80, 0.15)' : 'rgba(255, 82, 82, 0.15)' }]}>
+            <View style={[s.typeDot, { backgroundColor: recipe.isVeg ? '#4CAF50' : '#FF5252' }]} />
           </View>
         </View>
-      </TouchableOpacity>
-    </Animated.View>
-  );
-};
+        <Text style={s.cardMeta}>{recipe.calories} kcal • {recipe.prepTime}</Text>
+        <View style={s.cardStats}>
+          <View style={[s.diffBadge, { backgroundColor: getDiffColor(recipe.difficulty) }]}>
+            <Text style={s.diffText}>{recipe.difficulty}</Text>
+          </View>
+          <Text style={s.proteinText}>{recipe.protein}g Protein</Text>
+        </View>
+        {recipe.missingIngredientSuggestion && (
+          <View style={s.smartTip}>
+            <Ionicons name="bulb-outline" size={12} color={COLORS.accent} />
+            <Text style={s.smartTipText} numberOfLines={1}>{recipe.missingIngredientSuggestion}</Text>
+          </View>
+        )}
+      </View>
+      <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.2)" />
+    </TouchableOpacity>
+  </Animated.View>
+);
 
-const CookSuggestScreen = ({ onRecipeSelect }) => {
-  const [selectedMood, setSelectedMood] = useState('healthy');
-  const [selectedDiet, setSelectedDiet] = useState('Any');
+// ─── Main Screen ──────────────────────────────────────────────────────────────
+
+const CookSuggestScreen = () => {
+  const [selectedCat, setSelectedCat] = useState('indian');
   const [ingredientInput, setIngredientInput] = useState('');
   const [ingredients, setIngredients] = useState([]);
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState([]);
   const [searched, setSearched] = useState(false);
+  
+  const [selectedRecipe, setSelectedRecipe] = useState(null);
+  const [modalVisible, setModalVisible] = useState(false);
 
+  const addIngredient = (ing) => {
+    const val = (ing || ingredientInput).trim().toLowerCase();
+    if (val && !ingredients.includes(val)) {
+      setIngredients([...ingredients, val]);
+      setIngredientInput('');
+    }
+  };
+
+  const removeIngredient = (ing) => {
+    setIngredients(ingredients.filter(i => i !== ing));
+  };
 
   const findRecipes = async () => {
     if (ingredients.length === 0 || loading) return;
@@ -102,134 +121,359 @@ const CookSuggestScreen = ({ onRecipeSelect }) => {
       const groqMessages = [
         { 
           role: "system", 
-          content: "You are a creative chef. Respond ONLY with a valid JSON object containing an array of 4 recipes. Format: { \"recipes\": [...] }" 
+          content: "You are an expert Indian Home Chef. Suggest realistic recipes based on available ingredients. Respond ONLY with JSON. No text before or after JSON." 
         },
         { 
           role: "user", 
-          content: `Suggest 4 recipes I can cook with these ingredients: ${ingredients.join(', ')}. Mood: ${selectedMood}. Diet: ${selectedDiet}. Each recipe must have: name, emoji, calories, cookTime, difficulty (Easy/Medium/Hard), matchPercent, haveIngredients, needIngredients, steps, category: 'Cook'.`
+          content: `Available ingredients: ${ingredients.join(', ')}. Category: ${selectedCat}.
+          Generate 3-4 realistic Indian recipes.
+          
+          JSON Format:
+          {
+            "recipes": [
+              {
+                "name": "Recipe Name",
+                "emoji": "🥘",
+                "calories": 450,
+                "protein": 15,
+                "carbs": 50,
+                "fats": 12,
+                "prepTime": "20 min",
+                "difficulty": "Easy",
+                "isVeg": true,
+                "ingredients": ["ing 1 (qty)", "ing 2 (qty)"],
+                "steps": ["Step 1", "Step 2"],
+                "missingIngredientSuggestion": "Add 'X' to make this better/possible",
+                "chefNotes": "Pro tip for cooking this",
+                "healthyTip": "How to make it healthier",
+                "youtubeQuery": "Search query for YouTube (e.g. how to make paneer butter masala)"
+              }
+            ]
+          }`
         }
       ];
 
-      const rawText = await callGroqAPI(groqMessages);
+      const res = await callGroqAPI(groqMessages);
       
-      const cleanJson = (rawText || "").replace(/```json|```/g, '').trim();
-      const parsed = JSON.parse(cleanJson);
-      setResults(parsed.recipes || []);
-    } catch (error) {
-      console.error("Cook API Error:", error.message);
-      Alert.alert(
-        "Chef is Busy! 🧑‍🍳", 
-        "Could not get fresh suggestions. Showing some kitchen staples instead!",
-        [{ text: "Show Recipes", onPress: () => setResults(FALLBACK_RECIPES) }]
-      );
+      // ─── Production-Safe Parsing Logic ─────────────────────────────────────
+      let cleanText = res || "";
+      
+      // 1. Remove markdown wrappers
+      cleanText = cleanText.replace(/```json/g, "").replace(/```/g, "");
+      
+      // 2. Remove invalid control characters (U+0000 to U+001F)
+      // These are often the cause of "JSON Parse error: U+0000 thru U+001F is not allowed"
+      cleanText = cleanText.replace(/[\x00-\x1F\x7F]/g, "");
+      
+      // 3. Trim whitespace
+      cleanText = cleanText.trim();
+
+      try {
+        const parsed = JSON.parse(cleanText);
+        setResults(parsed.recipes || []);
+      } catch (parseError) {
+        console.warn("Malformed AI JSON, attempting fallback parsing...", parseError);
+        // Fallback: If JSON is slightly broken, we can try to extract just the array part or show error
+        Alert.alert("Chef's Note", "The recipe formatting was a bit messy, but we're working on it! Try searching again.");
+        setResults([]);
+      }
+    } catch (e) {
+      console.error("AI Fetch Error:", e);
+      Alert.alert("Error", "Could not fetch AI recipes. Try again.");
     } finally {
       setLoading(false);
     }
   };
 
-  const addIngredient = () => {
-    if (ingredientInput.trim() && !ingredients.includes(ingredientInput.trim().toLowerCase())) {
-      setIngredients([...ingredients, ingredientInput.trim().toLowerCase()]);
-      setIngredientInput('');
-    }
+  const openYoutube = (query) => {
+    const q = encodeURIComponent(query || "Indian recipes");
+    const url = `https://www.youtube.com/results?search_query=${q}`;
+    Linking.openURL(url).catch(() => {
+      Alert.alert("Error", "Could not open YouTube.");
+    });
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={s.container} edges={['top']}>
       <StatusBar barStyle="light-content" />
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.scrollContent}>
+        
+        {/* Header */}
         <Animated.View entering={FadeInUp}>
-          <View style={styles.header}>
-            <Text style={styles.title}>What Can I Cook? 👨‍🍳</Text>
-            <Text style={styles.subtitle}>Ingredients you have at home</Text>
-          </View>
+          <Text style={s.title}>What Can I Cook? 👨‍🍳</Text>
+          <Text style={s.subtitle}>Turn your available ingredients into a feast</Text>
         </Animated.View>
 
-        <View style={styles.moodGrid}>
-          {moods.map((mood) => (
-            <TouchableOpacity key={mood.id} style={[styles.moodCard, selectedMood === mood.id && styles.moodCardSelected]} onPress={() => setSelectedMood(mood.id)}>
-              <Text style={styles.moodEmoji}>{mood.emoji}</Text>
-              <Text style={[styles.moodLabel, selectedMood === mood.id && styles.moodLabelSelected]}>{mood.label}</Text>
+        {/* Categories Horizontal Scroll */}
+        <View style={s.catSection}>
+          <Text style={s.sectionTitle}>Select Category</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.catList}>
+            {COOK_CATEGORIES.map(cat => (
+              <TouchableOpacity 
+                key={cat.id} 
+                style={[s.catPill, selectedCat === cat.id && s.catPillActive]} 
+                onPress={() => setSelectedCat(cat.id)}
+              >
+                <Text style={s.catEmoji}>{cat.emoji}</Text>
+                <Text style={[s.catLabel, selectedCat === cat.id && s.catLabelActive]}>{cat.label}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
+
+        {/* Ingredient Input Area */}
+        <View style={s.inputBox}>
+          <Text style={s.sectionTitle}>What's in your kitchen?</Text>
+          <View style={s.inputWrapper}>
+            <TextInput 
+              placeholder="Type ingredient (e.g. paneer)" 
+              placeholderTextColor={COLORS.textSecondary}
+              style={s.textInput}
+              value={ingredientInput}
+              onChangeText={setIngredientInput}
+              onSubmitEditing={() => addIngredient()}
+            />
+            <TouchableOpacity style={s.addButton} onPress={() => addIngredient()}>
+              <Ionicons name="add" size={24} color="white" />
             </TouchableOpacity>
-          ))}
-        </View>
-
-        <View style={styles.ingredientInputContainer}>
-          <View style={styles.inputWrapper}>
-            {Platform.OS === 'ios' ? <BlurView intensity={20} tint="light" style={styles.inputBlur} /> : <View style={[styles.inputBlur, { backgroundColor: 'rgba(255, 255, 255, 0.1)' }]} />}
-            <View style={styles.inputContent}>
-              <TextInput placeholder="e.g. eggs, tomatoes..." placeholderTextColor={COLORS.textSecondary} style={styles.textInput} value={ingredientInput} onChangeText={setIngredientInput} onSubmitEditing={addIngredient} />
-              <TouchableOpacity style={styles.addButton} onPress={addIngredient}><Ionicons name="add" size={24} color="white" /></TouchableOpacity>
-            </View>
           </View>
-        </View>
 
-        <View style={styles.ingredientsList}>
-          {ingredients.map((ing) => (
-            <View key={ing} style={styles.ingPill}><Text style={styles.ingPillText}>{ing}</Text><TouchableOpacity onPress={() => setIngredients(ingredients.filter(i => i !== ing))}><Ionicons name="close-circle" size={16} color="white" style={{ marginLeft: 5 }} /></TouchableOpacity></View>
-          ))}
-        </View>
-
-        <TouchableOpacity style={[styles.findButton, ingredients.length === 0 && styles.findButtonDisabled]} onPress={findRecipes} disabled={loading || ingredients.length === 0}>
-          <LinearGradient colors={[COLORS.accent, COLORS.secondaryAccent]} style={styles.buttonGradient}>{loading ? <ActivityIndicator size="small" color="white" /> : <Text style={styles.buttonText}>Find AI Recipes 🔍</Text>}</LinearGradient>
-        </TouchableOpacity>
-
-        {searched && (
-          <View style={styles.resultsSection}>
-            <Text style={styles.sectionTitle}>Suggestions 🎉</Text>
-            {results.map((recipe, idx) => (
-              <RecipeResultCard key={idx} recipe={recipe} onPress={() => onRecipeSelect({...recipe, category: 'Cook'})} />
+          {/* Quick Suggestions */}
+          <View style={s.quickIngreds}>
+            {QUICK_INGREDIENTS.filter(i => !ingredients.includes(i)).slice(0, 8).map(ing => (
+              <TouchableOpacity key={ing} style={s.quickPill} onPress={() => addIngredient(ing)}>
+                <Text style={s.quickPillText}>+ {ing}</Text>
+              </TouchableOpacity>
             ))}
           </View>
+
+          {/* Active Ingredients Chips */}
+          <View style={s.activeIngreds}>
+            {ingredients.map(ing => (
+              <View key={ing} style={s.ingChip}>
+                <Text style={s.ingChipText}>{ing}</Text>
+                <TouchableOpacity onPress={() => removeIngredient(ing)}>
+                  <Ionicons name="close-circle" size={18} color="white" style={{ marginLeft: 6 }} />
+                </TouchableOpacity>
+              </View>
+            ))}
+          </View>
+        </View>
+
+        {/* Find Button */}
+        <TouchableOpacity 
+          style={[s.findBtn, ingredients.length === 0 && s.findBtnDisabled]} 
+          onPress={findRecipes}
+          disabled={loading || ingredients.length === 0}
+        >
+          <LinearGradient colors={[COLORS.accent, COLORS.secondaryAccent]} style={s.findBtnGrad}>
+            {loading ? <ActivityIndicator color="white" /> : <Text style={s.findBtnText}>Generate AI Recipes 🪄</Text>}
+          </LinearGradient>
+        </TouchableOpacity>
+
+        {/* Results */}
+        {searched && (
+          <View style={s.resultsSection}>
+            <Text style={s.sectionTitle}>Possible Delights 🎉</Text>
+            {results.map((recipe, idx) => (
+              <RecipeCard 
+                key={idx} 
+                recipe={recipe} 
+                onPress={() => { setSelectedRecipe(recipe); setModalVisible(true); }} 
+              />
+            ))}
+            {results.length === 0 && !loading && <Text style={s.emptyText}>No recipes found. Try adding more base ingredients like spices or grains.</Text>}
+          </View>
         )}
-        <View style={{ height: 120 }} />
+
+        <View style={{ height: 150 }} />
       </ScrollView>
+
+      {/* ─── Recipe Detail Modal ──────────────────────────────────────────────── */}
+      <Modal visible={modalVisible} animationType="slide" transparent onRequestClose={() => setModalVisible(false)}>
+        <View style={s.modalOverlay}>
+          <Animated.View entering={SlideInDown.duration(400)} style={s.modalSheet}>
+            <View style={s.modalHandle} />
+            {selectedRecipe && (
+              <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.modalScroll}>
+                <View style={s.modalHeader}>
+                  <Text style={s.modalEmojiLg}>{selectedRecipe.emoji}</Text>
+                  <View style={{ flex: 1 }}>
+                    <View style={s.modalTitleRow}>
+                      <Text style={s.modalRecipeName}>{selectedRecipe.name}</Text>
+                    </View>
+                    <View style={[s.modalTypeBadge, { backgroundColor: selectedRecipe.isVeg ? 'rgba(76, 175, 80, 0.15)' : 'rgba(255, 82, 82, 0.15)' }]}>
+                      <View style={[s.typeDot, { backgroundColor: selectedRecipe.isVeg ? '#4CAF50' : '#FF5252' }]} />
+                      <Text style={[s.modalTypeText, { color: selectedRecipe.isVeg ? '#4CAF50' : '#FF5252' }]}>{selectedRecipe.isVeg ? 'Vegetarian' : 'Non-Veg'}</Text>
+                    </View>
+                  </View>
+                  <TouchableOpacity onPress={() => setModalVisible(false)} style={s.closeBtn}>
+                    <Ionicons name="close" size={24} color="white" />
+                  </TouchableOpacity>
+                </View>
+
+                {/* Macro summary */}
+                <View style={s.modalStatsRow}>
+                  <View style={s.modalStatItem}>
+                    <Text style={s.modalStatVal}>{selectedRecipe.calories}</Text>
+                    <Text style={s.modalStatLab}>Calories</Text>
+                  </View>
+                  <View style={s.modalStatDivider} />
+                  <View style={s.modalStatItem}>
+                    <Text style={s.modalStatVal}>{selectedRecipe.protein}g</Text>
+                    <Text style={s.modalStatLab}>Protein</Text>
+                  </View>
+                  <View style={s.modalStatDivider} />
+                  <View style={s.modalStatItem}>
+                    <Text style={s.modalStatVal}>{selectedRecipe.prepTime}</Text>
+                    <Text style={s.modalStatLab}>Time</Text>
+                  </View>
+                </View>
+
+                {/* Ingredients */}
+                <View style={s.modalSection}>
+                  <Text style={s.modalSectionTitle}>Ingredients Needed</Text>
+                  <View style={s.ingredList}>
+                    {selectedRecipe.ingredients?.map((ing, i) => (
+                      <View key={i} style={s.ingredItem}>
+                        <Ionicons name="checkmark-circle" size={16} color={COLORS.accent} />
+                        <Text style={s.ingredText}>{ing}</Text>
+                      </View>
+                    ))}
+                  </View>
+                </View>
+
+                {/* Steps */}
+                <View style={s.modalSection}>
+                  <Text style={s.modalSectionTitle}>Cooking Steps</Text>
+                  {selectedRecipe.steps?.map((step, i) => (
+                    <View key={i} style={s.stepItem}>
+                      <View style={s.stepNum}><Text style={s.stepNumText}>{i + 1}</Text></View>
+                      <Text style={s.stepText}>{step}</Text>
+                    </View>
+                  ))}
+                </View>
+
+                {/* Pro Tips */}
+                <View style={s.tipBox}>
+                  <Text style={s.tipTitle}>Chef's Note 🧑‍🍳</Text>
+                  <Text style={s.tipText}>{selectedRecipe.chefNotes}</Text>
+                  <View style={s.tipDivider} />
+                  <Text style={s.tipTitle}>Healthy Tip 🥗</Text>
+                  <Text style={s.tipText}>{selectedRecipe.healthyTip}</Text>
+                </View>
+
+                {/* YouTube Button */}
+                <TouchableOpacity 
+                  style={s.youtubeBtn} 
+                  onPress={() => openYoutube(selectedRecipe.youtubeQuery || selectedRecipe.name)}
+                >
+                  <LinearGradient colors={['#FF0000', '#CC0000']} style={s.youtubeGrad}>
+                    <Ionicons name="logo-youtube" size={24} color="white" />
+                    <Text style={s.youtubeText}>Watch Tutorial on YouTube</Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+
+                <View style={{ height: 100 }} />
+              </ScrollView>
+            )}
+          </Animated.View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 };
 
-const styles = StyleSheet.create({
+// ─── Styles ───────────────────────────────────────────────────────────────────
+
+const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.primary },
   scrollContent: { padding: 20 },
-  header: { marginBottom: 25 },
   title: { color: 'white', fontSize: 28, fontWeight: 'bold' },
-  subtitle: { color: COLORS.textSecondary, fontSize: 16, marginTop: 4 },
-  sectionTitle: { color: 'white', fontSize: 18, fontWeight: 'bold', marginBottom: 15, marginTop: 10 },
-  moodGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', marginBottom: 20 },
-  moodCard: { width: '31%', height: 90, backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 15, justifyContent: 'center', alignItems: 'center', marginBottom: 10 },
-  moodCardSelected: { borderColor: COLORS.accent, borderWidth: 1 },
-  moodEmoji: { fontSize: 24, marginBottom: 5 },
-  moodLabel: { color: COLORS.textSecondary, fontSize: 10, textAlign: 'center' },
-  moodLabelSelected: { color: COLORS.accent },
-  ingredientInputContainer: { marginBottom: 15 },
-  inputWrapper: { borderRadius: 15, overflow: 'hidden', backgroundColor: 'rgba(255,255,255,0.1)' },
-  inputBlur: { ...StyleSheet.absoluteFillObject },
-  inputContent: { flexDirection: 'row', alignItems: 'center', height: 50, paddingHorizontal: 15 },
-  textInput: { flex: 1, color: 'white' },
-  addButton: { width: 30, height: 30, borderRadius: 8, backgroundColor: COLORS.accent, justifyContent: 'center', alignItems: 'center' },
-  ingredientsList: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: 20 },
-  ingPill: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.15)', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 12, marginRight: 5, marginBottom: 5 },
-  ingPillText: { color: 'white', fontSize: 12 },
-  findButton: { borderRadius: 30, overflow: 'hidden', marginBottom: 30 },
-  findButtonDisabled: { opacity: 0.5 },
-  buttonGradient: { paddingVertical: 15, alignItems: 'center' },
-  buttonText: { color: 'white', fontWeight: 'bold' },
-  resultsSection: { marginTop: 10 },
-  resultCard: { marginBottom: 15, borderRadius: 20, overflow: 'hidden', backgroundColor: 'rgba(255, 255, 255, 0.05)' },
-  cardContent: { padding: 15 },
-  cardHeader: { flexDirection: 'row', marginBottom: 10 },
-  recipeEmoji: { fontSize: 40, marginRight: 10 },
-  headerInfo: { flex: 1 },
-  titleRow: { flexDirection: 'row', justifyContent: 'space-between' },
-  recipeName: { color: 'white', fontSize: 16, fontWeight: 'bold' },
-  matchBadge: { backgroundColor: 'rgba(245,166,35,0.2)', paddingHorizontal: 5, borderRadius: 5 },
-  matchText: { color: COLORS.accent, fontSize: 10 },
-  difficultyRow: { flexDirection: 'row', alignItems: 'center', marginTop: 3 },
-  diffBadge: { paddingHorizontal: 6, borderRadius: 4, marginRight: 5 },
-  diffText: { color: 'white', fontSize: 10 },
-  recipeMeta: { color: COLORS.textSecondary, fontSize: 10 },
-  expandButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.1)' },
-  expandText: { color: COLORS.accent, fontSize: 12, fontWeight: 'bold' },
+  subtitle: { color: COLORS.textSecondary, fontSize: 15, marginTop: 4 },
+  
+  catSection: { marginTop: 25 },
+  sectionTitle: { color: 'white', fontSize: 18, fontWeight: 'bold', marginBottom: 15 },
+  catList: { paddingRight: 20 },
+  catPill: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.06)', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 25, marginRight: 10, borderWidth: 1, borderColor: 'rgba(255,255,255,0.05)' },
+  catPillActive: { backgroundColor: COLORS.accent, borderColor: COLORS.accent },
+  catEmoji: { fontSize: 18, marginRight: 8 },
+  catLabel: { color: COLORS.textSecondary, fontSize: 14, fontWeight: '600' },
+  catLabelActive: { color: 'white' },
+
+  inputBox: { marginTop: 30 },
+  inputWrapper: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 18, paddingHorizontal: 15, height: 56, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
+  textInput: { flex: 1, color: 'white', fontSize: 16 },
+  addButton: { width: 34, height: 34, borderRadius: 10, backgroundColor: COLORS.accent, justifyContent: 'center', alignItems: 'center' },
+  
+  quickIngreds: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 15 },
+  quickPill: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
+  quickPillText: { color: COLORS.textSecondary, fontSize: 12 },
+
+  activeIngreds: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 20 },
+  ingChip: { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.accent, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 15 },
+  ingChipText: { color: 'white', fontSize: 14, fontWeight: '600' },
+
+  findBtn: { marginTop: 30, borderRadius: 20, overflow: 'hidden', ...SHADOWS.medium },
+  findBtnDisabled: { opacity: 0.5 },
+  findBtnGrad: { height: 60, justifyContent: 'center', alignItems: 'center' },
+  findBtnText: { color: 'white', fontSize: 18, fontWeight: 'bold' },
+
+  resultsSection: { marginTop: 35 },
+  recipeCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 24, padding: 15, marginBottom: 15, borderWidth: 1, borderColor: 'rgba(255,255,255,0.05)' },
+  cardEmojiBg: { width: 60, height: 60, borderRadius: 18, backgroundColor: 'rgba(255,255,255,0.05)', justifyContent: 'center', alignItems: 'center', marginRight: 15 },
+  cardEmoji: { fontSize: 32 },
+  cardInfo: { flex: 1 },
+  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  cardTitle: { color: 'white', fontSize: 17, fontWeight: 'bold', maxWidth: '85%' },
+  cardMeta: { color: COLORS.textSecondary, fontSize: 12, marginTop: 4 },
+  cardStats: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 8 },
+  diffBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
+  diffText: { color: 'white', fontSize: 10, fontWeight: 'bold' },
+  proteinText: { color: COLORS.accent, fontSize: 11, fontWeight: 'bold' },
+  smartTip: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 8, backgroundColor: 'rgba(245,166,35,0.1)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
+  smartTipText: { color: COLORS.accent, fontSize: 10, fontWeight: '600' },
+  emptyText: { color: COLORS.textSecondary, textAlign: 'center', marginTop: 20, paddingHorizontal: 40 },
+
+  typeBadge: { width: 12, height: 12, borderRadius: 6, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
+  typeDot: { width: 6, height: 6, borderRadius: 3 },
+
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'flex-end' },
+  modalSheet: { backgroundColor: '#0A2E27', height: height * 0.88, borderTopLeftRadius: 35, borderTopRightRadius: 35 },
+  modalHandle: { width: 40, height: 4, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 2, alignSelf: 'center', marginTop: 15, marginBottom: 10 },
+  modalScroll: { padding: 25 },
+  modalHeader: { flexDirection: 'row', alignItems: 'center', gap: 15, marginBottom: 25 },
+  modalEmojiLg: { fontSize: 60 },
+  modalTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  modalRecipeName: { color: 'white', fontSize: 24, fontWeight: 'bold', flex: 1 },
+  modalTypeBadge: { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, marginTop: 6 },
+  modalTypeText: { fontSize: 11, fontWeight: 'bold' },
+  closeBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.1)', justifyContent: 'center', alignItems: 'center' },
+  
+  modalStatsRow: { flexDirection: 'row', justifyContent: 'space-around', backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 20, padding: 18, marginBottom: 30 },
+  modalStatItem: { alignItems: 'center' },
+  modalStatVal: { color: 'white', fontSize: 18, fontWeight: 'bold' },
+  modalStatLab: { color: COLORS.textSecondary, fontSize: 11, marginTop: 4 },
+  modalStatDivider: { width: 1, height: 30, backgroundColor: 'rgba(255,255,255,0.1)' },
+
+  modalSection: { marginBottom: 30 },
+  modalSectionTitle: { color: 'white', fontSize: 18, fontWeight: 'bold', marginBottom: 15 },
+  ingredList: { gap: 12 },
+  ingredItem: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  ingredText: { color: 'white', fontSize: 15 },
+  stepItem: { flexDirection: 'row', gap: 15, marginBottom: 20 },
+  stepNum: { width: 28, height: 28, borderRadius: 14, backgroundColor: COLORS.accent, justifyContent: 'center', alignItems: 'center' },
+  stepNumText: { color: 'white', fontWeight: 'bold', fontSize: 14 },
+  stepText: { color: 'rgba(255,255,255,0.8)', fontSize: 15, lineHeight: 24, flex: 1 },
+
+  tipBox: { backgroundColor: 'rgba(245,166,35,0.05)', borderRadius: 24, padding: 20, borderWidth: 1, borderColor: 'rgba(245,166,35,0.15)' },
+  tipTitle: { color: COLORS.accent, fontSize: 14, fontWeight: 'bold', marginBottom: 6 },
+  tipText: { color: 'white', fontSize: 14, lineHeight: 22 },
+  tipDivider: { height: 1, backgroundColor: 'rgba(245,166,35,0.1)', marginVertical: 15 },
+
+  youtubeBtn: { marginTop: 30, borderRadius: 20, overflow: 'hidden', ...SHADOWS.medium },
+  youtubeGrad: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12, paddingVertical: 16 },
+  youtubeText: { color: 'white', fontSize: 16, fontWeight: 'bold' },
 });
 
 export default CookSuggestScreen;

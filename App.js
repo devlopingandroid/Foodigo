@@ -5,13 +5,14 @@ import { NavigationContainer } from '@react-navigation/native';
 import { BlurView } from 'expo-blur';
 import * as SplashScreen from 'expo-splash-screen';
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Platform, StatusBar, StyleSheet, View } from 'react-native';
-import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
+import { ActivityIndicator, Platform, StatusBar, StyleSheet, View, Text, Image } from 'react-native';
+import Animated, { useAnimatedStyle, useSharedValue, withSpring, FadeIn, FadeInDown } from 'react-native-reanimated';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 
 import RecipeDetailModal from './components/RecipeDetailModal';
 import Toast from './components/Toast';
-import { COLORS } from './constants/theme';
+import { COLORS, SHADOWS } from './constants/theme';
 import ChatbotScreen from './screens/ChatbotScreen';
 import CookSuggestScreen from './screens/CookSuggestScreen';
 import ExploreScreen from './screens/ExploreScreen';
@@ -87,10 +88,43 @@ export default function App() {
   if (!appIsReady && isInitializing) {
     return (
       <View 
-        style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]} 
+        style={styles.splashContainer} 
         onLayout={onLayoutRootView}
       >
-        <ActivityIndicator size="large" color={COLORS.accent} />
+        <StatusBar barStyle="light-content" />
+        <LinearGradient
+          colors={['#0D5C4E', '#062E27', '#041F1A']}
+          style={StyleSheet.absoluteFill}
+        />
+        
+        <Animated.View 
+          entering={FadeIn.duration(800)}
+          style={styles.splashContent}
+        >
+          <Animated.View 
+            entering={FadeInDown.delay(200).springify().damping(15)}
+            style={styles.logoWrapper}
+          >
+            <View style={styles.logoCircle}>
+              <Image 
+                source={require('./assets/images/Foodigo.png')} 
+                style={styles.logoImage}
+                resizeMode="contain"
+              />
+            </View>
+          </Animated.View>
+
+          <Animated.View entering={FadeInDown.delay(400).springify().damping(15)}>
+            <Text style={styles.splashTitle}>Foodigo</Text>
+            <Text style={styles.splashSubtitle}>AI-POWERED NUTRITION</Text>
+          </Animated.View>
+
+          <ActivityIndicator 
+            size="small" 
+            color={COLORS.accent} 
+            style={{ marginTop: 50 }} 
+          />
+        </Animated.View>
       </View>
     );
   }
@@ -148,13 +182,13 @@ export default function App() {
               })}
             >
               <Tab.Screen name="Home">
-                {props => <HomeScreen {...props} onRecipeSelect={setSelectedRecipe} />}
+                {(props) => <HomeScreen {...props} onRecipeSelect={setSelectedRecipe} />}
               </Tab.Screen>
-              <Tab.Screen name="Explore">
-                {props => <ExploreScreen {...props} onRecipeSelect={setSelectedRecipe} />}
-              </Tab.Screen>
+              <Tab.Screen name="Explore" component={ExploreScreen} />
               <Tab.Screen name="AI Chat" component={ChatbotScreen} />
-              <Tab.Screen name="Cook" component={CookSuggestScreen} />
+              <Tab.Screen name="Cook">
+                {(props) => <CookSuggestScreen {...props} onRecipeSelect={setSelectedRecipe} />}
+              </Tab.Screen>
               <Tab.Screen name="Profile" component={ProfileScreen} />
             </Tab.Navigator>
           </NavigationContainer>
@@ -205,6 +239,7 @@ const styles = StyleSheet.create({
     bottom: 25,
     left: 20,
     right: 20,
+    elevation: 0,
     height: 70,
     backgroundColor: 'transparent',
     borderTopWidth: 0,
@@ -216,5 +251,48 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.3,
     shadowRadius: 20,
+  },
+  splashContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  splashContent: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  logoWrapper: {
+    marginBottom: 20,
+  },
+  logoCircle: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.2)',
+    overflow: 'hidden',
+  },
+  logoImage: {
+    width: '80%',
+    height: '80%',
+  },
+  splashTitle: {
+    color: 'white',
+    fontSize: 42,
+    fontWeight: 'bold',
+    letterSpacing: 2,
+    textAlign: 'center',
+  },
+  splashSubtitle: {
+    color: COLORS.accent,
+    fontSize: 14,
+    fontWeight: '600',
+    marginTop: 5,
+    letterSpacing: 4,
+    textTransform: 'uppercase',
+    textAlign: 'center',
   }
 });

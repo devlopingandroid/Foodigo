@@ -1,3 +1,4 @@
+import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, View, Platform } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { COLORS, SIZES } from '../constants/theme';
